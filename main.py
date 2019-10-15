@@ -12,11 +12,15 @@ class Shape:
         self.name = name
         self.parameters = parameters
 
+class ImageAndShapes:
+    def __init__(self, img: Image, shapes: list):
+        self.img = img
+        self.shapes = shapes
+
 class ImageShaper:
     def __init__(self, path_to_initial_img):
         self.shape = 'Triangle'
         # Each shape is a gene
-        self.shapes_parameters = []
         self.initial_img = Image.open(path).convert('RGB')
         self.rgb_array_initial = np.asarray(self.initial_img)
         self.lab_array_initial = color.rgb2lab(self.rgb_array_initial)
@@ -48,6 +52,7 @@ class ImageShaper:
     def generate_image(self, k=100):
         mean_colour = self.get_mean_colour(self.rgb_array_initial).astype('uint8')
         np.append(mean_colour, 0)
+        shapes = []
         # Alpha channel
         initial_transp = Image.new('RGBA', self.initial_img.size, tuple(mean_colour))
         # Generate an image containing k shapes
@@ -67,13 +72,13 @@ class ImageShaper:
                                rn.randint(0, w), rn.randint(0, h),
                                rn.randint(0, w), rn.randint(0, h)]
 
-                self.shapes_parameters.append(Shape(self.shape, coordinates))
+                shapes.append(Shape(self.shape, coordinates))
 
             transparent_img_draw.polygon(coordinates, fill=new_colour)
-            initial_transp = Image.alpha_composite(initial_transp, transparent_img, )
+            initial_transp = Image.alpha_composite(initial_transp, transparent_img)
 
         # initial_transp.convert('RGB').show()
-        return initial_transp.convert('RGB')
+        return ImageAndShapes(initial_transp.convert('RGB'), shapes)
 
     def compute_distance(self, image):
         """
@@ -92,6 +97,7 @@ class ImageShaper:
         number_of_images = 5
         images = []
 
+        # Pretty long for 10 shapes
         for i in range(number_of_images):
             print(f'Generating image {i+1}...', end=' ')
             images.append(self.generate_image(k=10))
@@ -101,13 +107,33 @@ class ImageShaper:
         # Yeah I know double loop but I want to keep them separated for now
         distances = []
         for i in range(number_of_images):
-            distances.append(self.compute_distance(images[i]))
+            print(f'Computing distance from original image to image {i+1}...', end=' ')
+            distances.append(self.compute_distance(images[i].img))
+            print('Done.')
 
-        breakpoint()
+
+        closest_images_idx = []
+        number_of_closest = 3
+
+        print(distances)
+
+        for i in range(number_of_closest):
+            idx = distances.index(min(distances))
+            closest_images_idx.append(idx)
+            distances[idx] = max(distances)
+
+        genes = [images[x].shapes for x in range(number_of_closest)]
+
+        new_shapes = self.algotum_geneticum(genes)
         # TODO:
         # Take the n closest pictures
         # Do an AlgoGen stuff (polygons as genes)
         # Do another pass with the output image as a base
+
+
+    def algotum_geneticum(self, genes):
+        breakpoint()
+        pass
 
 
     def dst(self, c1, c2):
