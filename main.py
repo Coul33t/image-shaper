@@ -3,6 +3,7 @@ import numpy as np
 
 from PIL import Image, ImageDraw
 from skimage import color
+import cv2
 
 from math import sqrt
 
@@ -69,50 +70,129 @@ class ImageShaper:
 
         return ImageAndShapes(initial_transp.convert('RGB'), shapes)
 
-    def generate_image(self, base_image_and_shape, k=100):
-        # TODO: re-use the old method of generating the image from the mean colour
-        # and shapes
-        # Alpha channel
-        initial_transp = base_image_and_shape.img.convert('RGBA')
-        # Generate an image containing k shapes
-        for _ in range(k):
-            transparent_img = Image.new('RGBA', self.initial_img.size, (255,255,255,0))
-            transparent_img_draw = ImageDraw.Draw(transparent_img)
-            # Last one is alpha
+    def generate_shapes(self, shapes_to_use: list = [], k: int = 100):
+        shapes = []
+        if not shapes_to_use:
+            shapes_to_use = ['Triangle' for x in range(k)]
+
+        for shape in shapes_to_use:
+
             new_colour = (rn.randint(0, 255),
                           rn.randint(0, 255),
-                          rn.randint(0, 255),
-                          127)
+                          rn.randint(0, 255))
 
-            if self.shape == 'Triangle':
+            if shape == 'Triangle':
                 h = self.rgb_array_initial.shape[0]
                 w = self.rgb_array_initial.shape[1]
                 coordinates = [rn.randint(0, w), rn.randint(0, h),
                                rn.randint(0, w), rn.randint(0, h),
                                rn.randint(0, w), rn.randint(0, h)]
 
-                base_image_and_shape.shapes.append(Shape(self.shape, new_colour, coordinates))
+            shapes.append(Shape(shape, new_colour, {'coordinates': coordinates}))
 
-            transparent_img_draw.polygon(coordinates, fill=new_colour)
+        return shapes
+
+    def generate_image(self, base_image_and_shape: ImageAndShapes, k: int = 100):
+
+        mean_colour = self.get_mean_colour(self.rgb_array_initial).astype('uint8')
+        # Alpha channel
+        np.append(mean_colour, 0)
+        initial_transp = Image.new('RGBA', base_image_and_shape.img.size, tuple(mean_colour))
+
+        # TODO: check if it's really needed to recreate a new image each time
+        # (see https://stackoverflow.com/questions/359706/how-do-you-draw-transparent-polygons-with-python)
+        # Redraw the image with the shapes
+        for shape in base_image_and_shape.shapes:
+            transparent_img = Image.new('RGBA', self.initial_img.size, (255,255,255,0))
+            transparent_img_draw = ImageDraw.Draw(transparent_img)
+            # Append the alpha channel
+            transparent_img_draw.polygon(shape.parameters['coordinates'], fill=tuple(np.append(shape.colour, 127)))
             initial_transp = Image.alpha_composite(initial_transp, transparent_img)
 
         # initial_transp.convert('RGB').show()
         base_image_and_shape.img = initial_transp.convert('RGB')
 
+    def generate_subimage_one_shape(self, base_image_and_shape: ImageAndShapes, idx: int):
+        mean_colour = self.get_mean_colour(self.rgb_array_initial).astype('uint8')
+        # Alpha channel
+        np.append(mean_colour, 0)
+
+        # Modify here when TODO is done
+        initial_transp = Image.new('RGBA', base_image_and_shape.img.size, tuple(mean_colour))
+
+        shape = base_image_and_shape.shapes[idx]
+
+        min_x = min([x for i, x in enumerate(shape.parameters['coordinates']) if i%2 == 0])
+        max_x = max([x for i, x in enumerate(shape.parameters['coordinates']) if i%2 == 0])
+        min_y = min([x for i, x in enumerate(shape.parameters['coordinates']) if i%2 == 1])
+        max_y = max([x for i, x in enumerate(shape.parameters['coordinates']) if i%2 == 1])
+
+        # TODO: take only the sub-image from these coordinates (worst case: same performance)
+        breakpoint()
+
+        # Redraw the image with the shape
+        transparent_img = Image.new('RGBA', self.initial_img.size, (255,255,255,0))
+        transparent_img_draw = ImageDraw.Draw(transparent_img)
+        # Append the alpha channel
+        transparent_img_draw.polygon(shape.parameters['coordinates'], fill=tuple(np.append(shape.colour, 127)))
+        initial_transp = Image.alpha_composite(initial_transp, transparent_img)
+
+        # initial_transp.convert('RGB').show()
+        return initial_transp.convert('RGB')
+
     def compute_distance(self, image):
         """
-            Compute the total distance between two images in L*a*b* space.
+            Compute the total distance between two images, after switching them
+            to the L*a*b* space.
         """
-        # TODO: HUGE BOTTLENECK HERE! scikit-image's rgb2lab() is really slow
+        # HUGE BOTTLENECK HERE! scikit-image's rgb2lab() is really slow
         # replace with OpenCV one (should be faster)
-        image_lab_data = color.rgb2lab(np.asarray(image) / 255)
-        initial_lab_data = color.rgb2lab(np.asarray(self.initial_img) / 255)
+        # DONE: 3 times faster
+
+        image_lab_data = cv2.cvtColor(np.asarray(image, dtype='float32') / 255, cv2.COLOR_RGB2Lab)
+        initial_lab_data = cv2.cvtColor(np.asarray(self.initial_img, dtype='float32') / 255, cv2.COLOR_RGB2Lab)
 
         total_distance = np.sum(np.sqrt(pow(image_lab_data[:,:,0] - initial_lab_data[:,:,0], 2) +
                                         pow(image_lab_data[:,:,1] - initial_lab_data[:,:,1], 2) +
                                         pow(image_lab_data[:,:,2] - initial_lab_data[:,:,2], 2)))
 
         return total_distance / (self.height * self.width)
+
+    def compute_distance_between_two_images(self, initial_img, image_to_compare):
+        total_distance = np.sum(np.sqrt(pow(initial_img[:,:,0] - image_to_compare[:,:,0], 2) +
+                                        pow(initial_img[:,:,1] - image_to_compare[:,:,1], 2) +
+                                        pow(initial_img[:,:,2] - image_to_compare[:,:,2], 2)))
+
+        return total_distance / (self.height * self.width)
+
+    def compute_shapes_distance(self, image_and_shapes: ImageAndShapes):
+        # DONE: HUGE BOTTLENECK HERE! scikit-image's rgb2lab() is really slow
+        # replace with OpenCV one (should be faster)
+        # TODO: take only the sub-image containing the shape, same for the
+        # comparison
+        image_lab_data = cv2.cvtColor(np.asarray(self.initial_img, dtype='float32') / 255, cv2.COLOR_RGB2Lab)
+
+        distances = []
+
+        for i in range(len(image_and_shapes.shapes)):
+            print(i)
+            one_shape_image = self.generate_subimage_one_shape(image_and_shapes, i)
+            one_shape_image = cv2.cvtColor(np.asarray(one_shape_image, dtype='float32') / 255, cv2.COLOR_RGB2Lab)
+            distances.append(self.compute_distance_between_two_images(image_lab_data, one_shape_image))
+
+        return distances
+
+    def do_it_without_algo_gen(self):
+        number_of_polygons = 50
+        mean_colour = self.get_mean_colour(self.rgb_array_initial).astype('uint8')
+        final_image = ImageAndShapes(Image.new('RGB', self.initial_img.size, tuple(mean_colour)), [])
+
+        while True:
+            new_shapes = self.generate_shapes()
+            final_image.shapes.extend(new_shapes)
+            self.generate_image(final_image, k=number_of_polygons)
+            shapes_distances = self.compute_shapes_distance(final_image)
+            breakpoint()
 
     def do_it_with_algo_gen(self):
         number_of_images = 50
@@ -181,12 +261,6 @@ class ImageShaper:
 
         print(f'One distance is less than 10')
 
-        breakpoint()
-
-        # TODO:
-        # Take the n closest pictures
-        # Do an AlgoGen stuff (polygons as genes)
-        # Do another pass with the output image as a base
 
 
     def algotum_geneticum(self, images, distances):
@@ -234,7 +308,9 @@ class ImageShaper:
 def main(path: str):
 
     image_shaper = ImageShaper(path)
-    image_shaper.do_it_with_algo_gen()
+
+    image_shaper.do_it_without_algo_gen()
+    # image_shaper.do_it_with_algo_gen()
     # RGB [0, 255]
 
     # img = Image.open(path).convert('RGB')
@@ -247,7 +323,21 @@ def main(path: str):
 
     # mean_colour_img = get_mean_colour_array(mean_pixel_value, img.width, img.height, True)
 
+def test_opencv_scikit_image_time():
+    import time
 
+    im = Image.open('test.png').convert('RGB')
+
+    t = time.time()
+    cv2.cvtColor(np.asarray(im, dtype='float32') / 255, cv2.COLOR_RGB2Lab)
+    t_cv = time.time() - t
+
+    t = time.time()
+    color.rgb2lab(np.asarray(im) / 255)
+    t_si = time.time() - t
+
+    print(f'OpenCV rgb2lab time: {t_cv}')
+    print(f'scikit-image rgb2lab time: {t_si}')
 
 if __name__ == '__main__':
     path = 'test.jpg'
