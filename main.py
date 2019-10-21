@@ -132,6 +132,7 @@ class ImageShaper:
         while new_distance > old_distance:
             # generate 5 new shapes
             pass
+        pass
         breakpoint()
 
 
